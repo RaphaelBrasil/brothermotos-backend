@@ -1,17 +1,20 @@
 const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const { body, validationResult } = require("express-validator");
+const { ObjectId } = require("mongodb");
 const connectToDatabase = require("./db");
 
 async function run() {
 	try {
 		const dbName = "brotherMotos";
-		const collectionName = "profile";
+		const collectionProfilesName = "profiles";
+		const collectionTasksName = "tasks";
 
+		console.log(`Conectando ao banco de dados: ${dbName}`);
 		const db = await connectToDatabase(dbName);
 
-		const collection = db.collection(collectionName);
+		const collectionProfiles = db.collection(collectionProfilesName);
+		const collectionTasks = db.collection(collectionTasksName);
 
 		const app = express();
 		const port = process.env.PORT || 6060;
@@ -21,11 +24,13 @@ async function run() {
 		app.use(bodyParser.urlencoded({ extended: true }));
 
 		app.get("/", (req, res) => {
-			res.send("Servidor Node.js funcionando!");
+			return res.send("Servidor Node.js funcionando!");
 		});
 
+		const { body, validationResult } = require("express-validator");
+
 		app.post(
-			"/",
+			"/profiles",
 			[
 				body("name").notEmpty(),
 				body("email").notEmpty().isEmail(),
@@ -37,56 +42,42 @@ async function run() {
 					return res
 						.status(400)
 						.send(
-							`Não foi possivel validar o email e/ou a senha ${errors}\n`
+							`Não foi possível validar o email e/ou a senha ${errors}\n`
 						);
 				}
 
 				const { name, email, password } = req.body;
-				console.log(req.body);
 
 				try {
-					const insertResult = await collection.insertOne(req.body);
-					res.send(
-						`Usuário cadastrado e autenticado.\n Nome - ${name}, Email - ${email}, Senha - ${password}\n`
+					const existingProfile = await collectionProfiles.findOne({
+						email
+					});
+
+					if (existingProfile) {
+						if (existingProfile.password === password) {
+							return res.send({ email, name });
+						} else {
+							return res.status(400).send("Senha incorreta.\n");
+						}
+					}
+					const insertResult = await collectionProfiles.insertOne(
+						req.body
 					);
+					return res.send({ email, name });
 				} catch (err) {
 					console.log(err);
-					res.status(500).send(
-						`Something went wrong trying to insert the new documents: ${err}\n`
-					);
+					return res
+						.status(500)
+						.send(
+							`Something went wrong trying to insert the new documents: ${err}\n`
+						);
 				}
 			}
 		);
 
-		app.get("/profile/:email", async (req, res) => {
+		app.get("/profiles", async (req, res) => {
 			try {
-				const reqEmail = req.params.email;
-				const findOneQuery = { email: reqEmail };
-				const findOneResult = await collection.findOne(findOneQuery);
-
-				if (findOneResult === null) {
-					console.log(
-						`Couldn't find any person that contain ${reqEmail} as an email.\n`
-					);
-				} else {
-					console.log(
-						`Found a person with ${reqEmail} as an email:\n${JSON.stringify(
-							findOneResult
-						)}\n`
-					);
-					res.json(findOneResult);
-				}
-			} catch (error) {
-				console.error(
-					`Something went wrong trying to find one document: ${error}\n`
-				);
-				res.status(500).send("Erro interno do servidor");
-			}
-		});
-
-		app.get("/profile", async (req, res) => {
-			try {
-				const findAllResult = await collection.find().toArray();
+				const findAllResult = await collectionProfiles.find().toArray();
 
 				if (findAllResult.length === 0) {
 					console.log("No person found.\n");
@@ -97,12 +88,130 @@ async function run() {
 						} people:\n${JSON.stringify(findAllResult)}\n`
 					);
 				}
-				res.json(findAllResult);
+				return res.json(findAllResult);
 			} catch (error) {
 				console.error(
 					`Something went wrong trying to find all documents: ${error}\n`
 				);
-				res.status(500).send("Erro interno do servidor");
+				return res.status(500).send("Erro interno do servidor");
+			}
+		});
+
+		app.get("/profiles/:email", async (req, res) => {
+			try {
+				const reqEmail = req.params.email;
+				const findOneQuery = { email: reqEmail };
+				const findOneResult = await collectionProfiles.findOne(
+					findOneQuery
+				);
+				console.log(reqEmail);
+				if (findOneResult === null) {
+					console.log(
+						`Couldn't find any person that contain ${reqEmail} as an email.\n`
+					);
+					return res.status(500).send("Erro interno do servidor");
+				} else {
+					console.log(
+						`Found a person with ${reqEmail} as an email:\n${JSON.stringify(
+							findOneResult
+						)}\n`
+					);
+					return res.json(findOneResult);
+				}
+			} catch (error) {
+				console.error(
+					`Something went wrong trying to find one document: ${error}\n`
+				);
+				return res.status(500).send("Erro interno do servidor");
+			}
+		});
+
+		app.get("/tasks", async (req, res) => {
+			try {
+				const reqEmail = req.params.email;
+				const findAllResult = await collectionTasks.find().toArray();
+				return res.json(findAllResult);
+			} catch (error) {
+				console.error(`Erro ao buscar todas as tarefas: ${error}\n`);
+				return res.status(500).send("Erro interno do servidor");
+			}
+		});
+
+		app.get("/tasks/:email", async (req, res) => {
+			try {
+				const reqEmail = req.params.email;
+				// Filtrar as tarefas pelo email fornecido
+				const findAllResult = await collectionTasks
+					.find({ user: reqEmail })
+					.toArray();
+				return res.json(findAllResult);
+			} catch (error) {
+				console.error(
+					`Erro ao buscar tarefas para o email ${reqEmail}: ${error}\n`
+				);
+				return res.status(500).send("Erro interno do servidor");
+			}
+		});
+
+		app.post("/tasks", async (req, res) => {
+			const { _id, date, text, completed, user } = req.body;
+
+			try {
+				if (typeof _id === "string") {
+					// Verifica se é um ID já existente em StringHex
+					var objectId = ObjectId.createFromHexString(_id);
+				} else if (typeof _id === "number") {
+					// Verifica se é um ID em TimeStamp
+					var objectId = ObjectId.createFromTime(_id);
+				}
+				const updateResult = await collectionTasks.updateOne(
+					{ _id: objectId },
+					{
+						$set: {
+							date: date,
+							text: text,
+							completed: completed,
+							user: user
+						}
+					},
+					{ upsert: true }
+				);
+				console.log(`ID: ${typeof _id}`);
+				console.log(`ObjetoId: ${typeof objectId}`);
+				console.log(
+					`ObjetoId: ${objectId == "000000000000000000000000"}`
+				);
+				res.send({ updated: updateResult.modifiedCount });
+			} catch (err) {
+				console.log(err);
+				res.status(500).send(
+					`Something went wrong during the update: ${err}\n`
+				);
+			}
+		});
+
+		app.delete("/tasks/:id", async (req, res) => {
+			const objectId = ObjectId.createFromHexString(req.params.id);
+			console.log(req.params.id);
+			console.log(objectId);
+			try {
+				// Convert string ID to ObjectId
+				const deleteResult = await collectionTasks.deleteOne({
+					_id: objectId
+				});
+
+				console.log(deleteResult);
+
+				if (deleteResult.deletedCount === 0) {
+					return res.status(404).send("Task não encontrada.\n");
+				}
+
+				res.send({ deleted: deleteResult.deletedCount });
+			} catch (err) {
+				console.log(err);
+				res.status(500).send(
+					`Something went wrong during the delete: ${err}\n`
+				);
 			}
 		});
 
