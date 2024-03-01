@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const sgMail = require("@sendgrid/mail");
 const bodyParser = require("body-parser");
 const { ObjectId } = require("mongodb");
 const connectToDatabase = require("./db");
@@ -19,6 +20,8 @@ async function run() {
 		const app = express();
 		const port = process.env.PORT || 6060;
 
+		sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
 		app.use(cors());
 		app.use(bodyParser.json());
 		app.use(bodyParser.urlencoded({ extended: true }));
@@ -28,6 +31,50 @@ async function run() {
 		});
 
 		const { body, validationResult } = require("express-validator");
+
+		app.post(
+			"/email",
+			[
+				body("name").notEmpty(),
+				body("email").notEmpty().isEmail(),
+				body("password").notEmpty().isLength({ min: 6 })
+			],
+			async (req, res) => {
+				const errors = validationResult(req);
+				if (!errors.isEmpty()) {
+					return res
+						.status(400)
+						.send(
+							`Não foi possível validar o email e/ou a senha ${errors}\n`
+						);
+				}
+
+				const { name, email, password } = req.body;
+
+				const msg = {
+					to: "raphaelbrasil7@gmail.com", // Change to your recipient
+					from: "rt.raphael.oliveira@gmail.com", // Change to your verified sender
+					subject: "Sending with SendGrid is Fun",
+					text: `and easy to do anywhere, even with Node.js`,
+					html: `<strong>and easy to do anywhere, even with Node.js. Here is the message :${req.body.email}</strong>`
+				};
+
+				sgMail
+					.send(msg)
+					.then(() => {
+						console.log("Email sent");
+						return res.send(`Email Eviado`);
+					})
+					.catch((error) => {
+						console.error(error);
+						return res
+							.status(400)
+							.send(
+								`Não foi possível enviar o email: ${errors}\n`
+							);
+					});
+			}
+		);
 
 		app.post(
 			"/profiles",
